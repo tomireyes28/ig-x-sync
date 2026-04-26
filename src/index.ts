@@ -1,29 +1,33 @@
 import { config } from './config';
 import { fetchLatestPosts } from './services/instagram';
+import { postToTwitter } from './services/twitter';
 
 const run = async () => {
-  console.log('Iniciando sincronización IG -> X...\n');
+  console.log('🚀 Iniciando sincronización IG -> X...\n');
 
   try {
-    // Probamos traer los posts de la primera cuenta (MN Agent)
-    console.log(`Consultando posts para MN Agent (ID: ${config.meta.mnAgentId})...`);
-    
+    console.log(`Buscando el último post de MN Agent (ID: ${config.meta.mnAgentId})...`);
     const posts = await fetchLatestPosts(config.meta.mnAgentId);
     
-    if (posts.length > 0) {
-      console.log('✅ ¡Posts obtenidos con éxito!');
-      console.log('Último post encontrado:');
-      console.log(`- ID: ${posts[0].id}`);
-      console.log(`- Texto: ${posts[0].caption?.substring(0, 50)}...`);
-      console.log(`- URL Media: ${posts[0].media_url}`);
+    const firstPost = posts[0];
+    
+    if (firstPost) {
+      console.log('✅ Post encontrado en Instagram.');
+      const text = firstPost.caption || 'Nueva actualización';
+      
+      // Llamamos al servicio de Twitter
+      const tweet = await postToTwitter(firstPost.media_url, text);
+      
+      console.log(`\n🎉 ¡ÉXITO TOTAL! El posteo ya está publicado en X.`);
+      console.log(`🔗 Link: https://x.com/user/status/${tweet.id}`);
+      
     } else {
-      console.log('No se encontraron posts en esta cuenta.');
+      console.log('No se encontraron posts en esta cuenta de Instagram.');
     }
 
   } catch (error) {
-    console.error('💥 Falló la ejecución principal:', error);
+    console.error('\n💥 Falló la ejecución principal.');
   }
 };
 
-// Ejecutamos la función
 run();
