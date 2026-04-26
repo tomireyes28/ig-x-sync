@@ -1,0 +1,9 @@
+# Dependencias
+node_modules/
+
+# Credenciales y variables de entorno (¡CRÍTICO!)
+.env
+
+# Archivos compilados de TypeScript
+dist/
+build/
