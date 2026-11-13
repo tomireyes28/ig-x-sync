@@ -1,122 +1,87 @@
-import axios from 'axios';
-import { config } from '../config';
+import { SafeError } from '../utils/errors';
+import axios, { AxiosInstance } from 'axios';
 
 export type InstagramMediaType = 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM';
-
-export interface InstagramMediaChild {
-  id: string;
-  media_type: InstagramMediaType;
-  media_url?: string;
-}
-
-export interface InstagramMedia {
-  id: string;
-  media_type: InstagramMediaType;
-  media_url?: string;
+export interface InstagramMediaChild { id: string; media_type: InstagramMediaType; media_url?: string }
+export interface InstagramMedia extends InstagramMediaChild {
   caption?: string;
   permalink?: string;
   timestamp?: string;
-  children?: {
-    data: InstagramMediaChild[];
-  };
+  children?: { data: InstagramMediaChild[] };
 }
-
-export interface InstagramAccountFeed {
-  username: string;
-  mediaCount: number;
-  posts: InstagramMedia[];
-}
-
+export interface InstagramAccountFeed { username: string; mediaCount: number; posts: InstagramMedia[] }
 export interface SyncableInstagramPost {
-  id: string;
-  imageUrl: string;
-  caption: string;
-  mediaType: 'IMAGE' | 'CAROUSEL_ALBUM';
-  permalink?: string;
-  timestamp?: string;
+  id: string; imageUrl: string; caption: string; mediaType: 'IMAGE' | 'CAROUSEL_ALBUM';
+  permalink?: string; timestamp?: string;
 }
-
-interface InstagramGraphResponse {
-  username?: string;
-  media_count?: number;
-  media?: {
-    data: InstagramMedia[];
-  };
+interface MediaPage {
+  data: InstagramMedia[];
+  paging?: { next?: string; cursors?: { after?: string } };
 }
+const MEDIA_FIELDS = 'id,caption,media_type,media_url,permalink,timestamp,children.limit(100){id,media_type,media_url}';
+const MAX_PAGES = 20;
 
-const GRAPH_FIELDS =
-  'username,media_count,media{id,caption,media_type,media_url,permalink,timestamp,children{id,media_type,media_url}}';
-
-/**
- * Fetches the latest media items from an Instagram Business account via Meta Graph API.
- */
-export const fetchAccountFeed = async (accountId: string): Promise<InstagramAccountFeed> => {
-  try {
-    const url = `https://graph.facebook.com/${config.meta.apiVersion}/${accountId}`;
-
-    const response = await axios.get<InstagramGraphResponse>(url, {
-      params: {
-        fields: GRAPH_FIELDS,
-        access_token: config.meta.accessToken,
-      },
-      timeout: 15_000,
-    });
-
-    return {
-      username: response.data.username ?? accountId,
-      mediaCount: response.data.media_count ?? 0,
-      posts: response.data.media?.data ?? [],
-    };
-  } catch (error) {
-    console.error(`❌ Error consultando Meta Graph API para la cuenta ${accountId}:`);
-    if (axios.isAxiosError(error)) {
-      console.error(error.response?.data || error.message);
-    }
-    throw error;
-  }
-};
-
-/**
- * Backwards-compatible wrapper that returns only the media array for an account.
- */
-export const fetchLatestPosts = async (accountId: string): Promise<InstagramMedia[]> => {
-  const feed = await fetchAccountFeed(accountId);
-  return feed.posts;
-};
-
-/**
- * Resolves the first publishable image post (IMAGE or CAROUSEL_ALBUM) from an Instagram media item.
- * Returns null if the item is a VIDEO/Reel or has no valid image URL.
- */
 export const resolveSyncablePost = (media: InstagramMedia): SyncableInstagramPost | null => {
-  if (media.media_type === 'IMAGE' && media.media_url) {
-    return {
-      id: media.id,
-      imageUrl: media.media_url,
-      caption: media.caption?.trim() || '',
-      mediaType: 'IMAGE',
-      permalink: media.permalink,
-      timestamp: media.timestamp,
-    };
-  }
-
+  let imageUrl: string | undefined;
+  if (media.media_type === 'IMAGE') imageUrl = media.media_url;
   if (media.media_type === 'CAROUSEL_ALBUM') {
-    const firstImageChild = media.children?.data.find(
-      (child) => child.media_type === 'IMAGE' && Boolean(child.media_url)
-    );
-    const imageUrl = firstImageChild?.media_url || media.media_url;
-
-    if (imageUrl) {
-      return {
-        id: media.id,
-        imageUrl,
-        caption: media.caption?.trim() || '',
-        mediaType: 'CAROUSEL_ALBUM',
-        permalink: media.permalink,
-        timestamp: media.timestamp,
-      };
-    }
+    imageUrl = media.children?.data.find(child => child.media_type === 'IMAGE' && child.media_url)?.media_url;
   }
-
-  return null;
+  if (typeof imageUrl !== 'string' || !imageUrl || media.media_type === 'VIDEO') return null;
+  return { id: media.id, imageUrl, caption: media.caption?.trim() || '',
+    mediaType: media.media_type, permalink: media.permalink, timestamp: media.timestamp };
 };
+
+/** Walk cursor pages until the checkpoint. A missing checkpoint must never silently lose posts. */
+export const createInstagramService = (
+  settings: { accessToken: string; apiVersion: string },
+  http: Pick<AxiosInstance, 'get'> = axios,
+) => ({
+  async fetchAccountFeed(accountId: string, checkpoint?: string): Promise<InstagramAccountFeed> {
+    const base = `https://graph.facebook.com/${settings.apiVersion}/${accountId}`;
+    const options = {
+      headers: { Authorization: `Bearer ${settings.accessToken}` },
+      timeout: 15_000,
+      maxRedirects: 0,
+    };
+    const metadata = await http.get<{ username?: string; media_count?: number }>(base, {
+      ...options, params: { fields: 'username,media_count' },
+    });
+    const posts: InstagramMedia[] = [];
+    const seen = new Set<string>();
+    const cursors = new Set<string>();
+    let after: string | undefined;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const response = await http.get<MediaPage>(`${base}/media`, {
+        ...options, params: { fields: MEDIA_FIELDS, limit: 50, ...(after ? { after } : {}) },
+      });
+      if (!Array.isArray(response.data?.data)) throw new SafeError('Respuesta de medios de Meta inválida.');
+      for (const media of response.data.data) {
+        if (!media || typeof media.id !== 'string' || !/^\d+$/.test(media.id) ||
+            !['IMAGE', 'VIDEO', 'CAROUSEL_ALBUM'].includes(media.media_type) ||
+            (media.caption !== undefined && typeof media.caption !== 'string') ||
+            (media.children !== undefined && !Array.isArray(media.children?.data))) {
+          throw new SafeError('Publicación de Meta inválida.');
+        }
+        if (media.id === checkpoint) return { username: metadata.data.username || accountId,
+          mediaCount: metadata.data.media_count ?? 0, posts };
+        if (seen.has(media.id)) continue;
+        seen.add(media.id);
+        posts.push(media);
+        // Safe bootstrap: never flood X with the historical archive on first use.
+        if (!checkpoint && resolveSyncablePost(media)) return {
+          username: metadata.data.username || accountId, mediaCount: metadata.data.media_count ?? 0, posts,
+        };
+      }
+      if (!response.data.paging?.next) {
+        if (checkpoint) throw new SafeError('No se encontró el último post sincronizado; requiere revisión manual.');
+        return { username: metadata.data.username || accountId, mediaCount: metadata.data.media_count ?? 0, posts };
+      }
+      after = response.data.paging.cursors?.after;
+      if (!after || cursors.has(after)) throw new SafeError('Paginación de Meta inválida o repetida.');
+      cursors.add(after);
+    }
+    throw new SafeError('Se alcanzó el límite de 20 páginas sin resolver la continuidad del feed.');
+  },
+});
+

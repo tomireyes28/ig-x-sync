@@ -2,65 +2,84 @@ name: Instagram to X Sync
 
 on:
   schedule:
-    # Ejecuta automáticamente cada 30 minutos
-    - cron: '*/30 * * * *'
+    - cron: '7,37 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
-        description: 'Ejecutar en modo prueba (sin publicar en X)'
-        required: false
-        default: 'false'
+        description: 'Preview only (no X publication or state commits)'
+        required: true
+        default: 'true'
         type: choice
-        options:
-          - 'false'
-          - 'true'
+        options: ['true', 'false']
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: ig-x-sync-state
+  cancel-in-progress: false
 
 jobs:
   sync:
+    # One authoritative state branch. Scheduling is opt-in via a repository variable.
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (github.event_name == 'workflow_dispatch' || vars.SYNC_ENABLED == 'true')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+      STATE_PUSH_BRANCH: ${{ github.event.repository.default_branch }}
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout current state branch
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: '22'
+          cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Typecheck & Build
+      - name: Typecheck and test
         run: |
           npm run typecheck
-          npm run build
+          npm test
 
-      - name: Run IG -> X Synchronization
+      - name: Run synchronization
+        id: sync
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+          META_GRAPH_API_VERSION: ${{ vars.META_GRAPH_API_VERSION || 'v25.0' }}
+          IG_ACCOUNT_IDS: ${{ secrets.IG_ACCOUNT_IDS }}
           IG_MN_AGENT_ID: ${{ secrets.IG_MN_AGENT_ID }}
           IG_MN_FEDERAL_ID: ${{ secrets.IG_MN_FEDERAL_ID }}
           TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
           TWITTER_API_SECRET: ${{ secrets.TWITTER_API_SECRET }}
           TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
           TWITTER_ACCESS_SECRET: ${{ secrets.TWITTER_ACCESS_SECRET }}
-          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
         run: npm start
 
-      - name: Persist updated sync state
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/sync-state.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore(state): update last synced Instagram posts [skip ci]"
-            git push
-          else
-            echo "No state changes to commit."
-          fi
+      - name: Back up state after live execution
+        if: >-
+          always() && env.DRY_RUN == 'false' &&
+          (steps.sync.outcome == 'success' || steps.sync.outcome == 'failure' || steps.sync.outcome == 'cancelled')
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: sync-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: data/sync-state.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Persist state even after partial failures
+        if: >-
+          always() && env.DRY_RUN == 'false' &&
+          (steps.sync.outcome == 'success' || steps.sync.outcome == 'failure' || steps.sync.outcome == 'cancelled')
+        run: node dist/checkpoint.js

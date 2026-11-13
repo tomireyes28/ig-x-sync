@@ -1,167 +1,156 @@
-# 🔄 IG-X Sync: Multi-Account Social Automation Engine
+# IG-X Sync
 
-> **Automated, production-ready synchronization pipeline connecting multiple Instagram Business accounts to X (Twitter).**  
-> Built with TypeScript, Meta Graph API v25.0, X API v1.1/v2, and automated via serverless GitHub Actions cron scheduling.
+Sincronizador de varias cuentas profesionales de Instagram hacia **una cuenta de X**.
+TypeScript estricto, Meta Graph API, OAuth 1.0a de X y ejecución periódica en GitHub Actions.
 
----
+El caso de uso es evitar que un equipo publique manualmente la misma creatividad en dos
+plataformas. El proyecto se concentra en imágenes y en la recuperación segura entre
+pollings: procesa pendientes, registra lo publicado y detiene una cuenta cuando el
+resultado de una publicación es incierto.
 
-## 🎯 El Problema de Negocio (Caso Real)
+## Probar sin credenciales
 
-Una agencia de marketing y representación gestiona múltiples cuentas comerciales de Instagram con alta frecuencia de publicación. Mantener la presencia activa en X (Twitter) requería duplicar manualmente cada publicación, adaptar textos a la limitación de 280 caracteres y descargar/resubir creatividades en alta calidad.
+Requiere Node.js 22.17+ de la rama 22, o Node.js 24, y Git para las pruebas de integración.
 
-**Solución desarrollada:**
-Un microservicio desacoplado e idempotente que monitorea periódicamente los feeds de Instagram de la agencia, filtra de forma inteligente los formatos compatibles (imágenes individuales y carruseles), adapta los textos dinámicamente y publica el contenido multimedia en X de forma desatendida y sin costo de infraestructura fija.
+```bash
+git clone https://github.com/tomireyes28/ig-x-sync.git
+cd ig-x-sync
+npm ci
+npm run demo
+npm test
+```
 
----
+La demo usa feeds sintéticos, un adaptador HTTP en memoria y X simulado. No carga `.env`,
+no usa la red y guarda el estado en un directorio temporal que elimina al finalizar.
+Muestra preview, primer arranque, dos publicaciones pendientes, reejecución sin duplicados
+y una respuesta perdida que bloquea una cuenta mientras la otra continúa.
+Los enlaces de X que imprime son ficticios.
 
-## 🏗️ Arquitectura y Flujo de Datos
+## Comportamiento
+
+- **Primer arranque por cuenta:** publica solo el último post elegible, sin importar todo el archivo histórico.
+- **Siguientes ejecuciones:** recorre páginas hasta el último ID confirmado y publica pendientes del más antiguo al más nuevo. Omite IDs ya registrados.
+- **Formatos:** imágenes individuales y la primera imagen de un carrusel. Omite videos, Reels y carruseles sin imágenes; no replica el álbum completo.
+- **Texto:** normaliza a NFC, aplica el conteo ponderado de X y recorta sin separar grafemas ni URLs.
+- **Imágenes:** admite JPEG, PNG y WebP de hasta 5 MB, con comprobación de MIME/firma, HTTPS y CDN de Meta/Instagram. No convierte formatos ni decodifica la imagen completa.
+- **Fallos:** aísla cada cuenta, devuelve código de salida 1 si alguna falla y conserva los éxitos anteriores.
+- **Dry-run:** consulta Meta y muestra captions, sin descargar imágenes, subir media, crear posts ni modificar el estado. Requiere acceso a Meta y puede consumir su cuota.
+
+Si no encuentra el último ID confirmado (por borrado, permisos o más de 20 páginas),
+la cuenta falla para revisión. No avanza el checkpoint silenciosamente.
+
+## Arquitectura y decisiones
 
 ```mermaid
 flowchart TD
-    Trigger["⏰ GitHub Actions Cron (cada 30 min) / Local CLI"] --> Config["🔐 Config & Validación Fail-Fast (.env)"]
-    Config --> State["💾 Engine de Estado (data/sync-state.json)"]
-
-    subgraph MultiAccount["Orquestador Multi-Cuenta con Aislamiento"]
-        Acc1["📸 Instagram: MN Agent"]
-        Acc2["📸 Instagram: MN Federal"]
-    end
-
-    Config --> Acc1
-    Config --> Acc2
-
-    subgraph Processing["Pipeline de Procesamiento"]
-        Filter["🔍 Filtro de Medios: IMAGE & CAROUSEL_ALBUM\n(Descarta VIDEO/Reels de forma segura)"]
-        CheckState{"¿Post ya sincronizado?"}
-        Download["🖼️ Descarga ArrayBuffer + MIME Detection"]
-        Format["✂️ Normalización & Formateo de Texto (<= 280 chars)"]
-    end
-
-    Acc1 --> Filter
-    Acc2 --> Filter
-    Filter --> CheckState
-    CheckState -- "Sí" --> Skip["⏭️ Omitir (Idempotente)"]
-    CheckState -- "No" --> Download
-    Download --> Format
-
-    subgraph XPipeline["Publicación en X (Estrategia Híbrida)"]
-        UploadMedia["📤 X API v1.1: Upload Binary Media (Chunked/Buffer)"]
-        CreateTweet["🐦 X API v2: Create Tweet with media_id"]
-    end
-
-    Format --> UploadMedia
-    UploadMedia --> CreateTweet
-    CreateTweet --> Persist["💾 Actualizar sync-state.json & Commit automático"]
+    CLI[CLI / GitHub Actions] --> Config[Configuración validada]
+    Config --> Lock[Bloqueo local + estado validado]
+    Lock --> Meta[Meta: feed paginado]
+    Meta --> Queue[Pendientes en orden cronológico]
+    Queue --> Media[Caption + descarga y upload X v1.1]
+    Media --> Pending[Guardar pendingPost]
+    Pending --> Checkpoint[Actions: commit y push del estado]
+    Checkpoint --> Tweet[Crear post en X v2]
+    Tweet --> Confirm[Confirmar estado y volver a persistir]
+    Tweet -- Resultado incierto --> Review[Bloquear cuenta y recuperar manualmente]
 ```
 
----
+El archivo JSON evita una base de datos para un volumen pequeño. Las escrituras usan
+archivo temporal, flush y reemplazo atómico. Se mantiene compatibilidad de lectura con
+el estado original. Un bloqueo exclusivo evita solapamientos en el mismo directorio.
 
-## 💡 Decisiones Técnicas Destacadas
+En Actions, la creación en X exige que el registro pendiente ya haya llegado a GitHub.
+Si el runner cae después, la siguiente ejecución encuentra ese registro y requiere
+reconciliación. Un push rechazado nunca se resuelve con force-push ni con un merge
+automático del estado.
 
-1. **Estrategia Híbrida de API en X (v1.1 + v2):**  
-   La API v2 de X está optimizada para la creación de tweets (`/2/tweets`), pero la subida de binarios multimedia sigue requiriendo los endpoints optimizados de la API v1.1 (`/1.1/media/upload`). El cliente abstrae esta complejidad utilizando `twitter-api-v2` combinando ambas versiones de forma transparente.
-2. **Idempotencia sin Costo de Infraestructura:**  
-   En lugar de provisionar una base de datos externa para guardar el estado, el servicio utiliza `data/sync-state.json`. Cuando se ejecuta en GitHub Actions, el runner detecta si hubo cambios y realiza un commit automático (`[skip ci]`), manteniendo la persistencia en el propio repositorio de forma serverless y 100% gratuita.
-3. **Validación Fail-Fast:**  
-   En el arranque del servicio (`src/config/index.ts`), el sistema valida que todas las credenciales requeridas existan y no estén vacías. Si falta alguna variable, el proceso se interrumpe de inmediato con un mensaje descriptivo, evitando errores crípticos a mitad del ciclo.
-4. **Tolerancia a Fallos por Cuenta (Fault-Tolerant Multi-Account):**  
-   Cada cuenta de Instagram se procesa dentro de su propio límite de error (`try/catch`). Si una cuenta experimenta problemas de permisos o límites de tasa (rate limits), las demás cuentas continúan su sincronización normalmente.
-5. **Manejo de Carruseles y Tipos de Medio:**  
-   Meta Graph API estructura los álbumes con un array `children`. El servicio resuelve la primera imagen válida de un carrusel manteniendo la consistencia visual y omite limpiamente los videos/reels para evitar fallos por formatos incompatibles en X.
+Esto **no es una garantía exactly-once distribuida**: X y Git no comparten una transacción.
+La estrategia prioriza detenerse y revisar antes que reintentar una creación incierta.
+El bloqueo local tampoco coordina máquinas distintas: se debe operar con una única
+copia autorizada del estado. Para mayor escala, convendría una base transaccional y una cola.
 
----
+Los clientes están separados del orquestador y se inyectan como dependencias. Las pruebas
+cubren la lógica sin servicios externos, el SDK de X con interceptación previa a la red,
+los comandos compilados y un remoto Git local para comprobar checkpoints y conflictos.
 
-## 🗂️ Estructura del Proyecto
+## Configuración real
 
-```text
-ig-x-sync/
-├── .github/
-│   └── workflows/
-│       └── sync.yml            # Automatización CI/CD y Cron Serverless
-├── data/
-│   └── sync-state.json         # Registro de estado e idempotencia
-├── src/
-│   ├── config/
-│   │   └── index.ts            # Configuración tipada y validación Fail-Fast
-│   ├── services/
-│   │   ├── instagram.ts        # Meta Graph API v25.0 (feeds, álbumes e imágenes)
-│   │   └── twitter.ts          # Integración X API v1.1 + v2
-│   ├── utils/
-│   │   ├── image.ts            # Descarga de buffer y resolución MIME
-│   │   └── state.ts            # Gestor de persistencia de posts sincronizados
-│   └── index.ts                # Orquestador principal multi-cuenta
-├── .env.example                # Plantilla de variables de entorno
-├── package.json                # Scripts y dependencias
-└── tsconfig.json               # Configuración TypeScript estricta (Node16)
-```
+Esta implementación usa **Instagram API with Facebook Login**: una cuenta profesional
+conectada a una página, una app de Meta habilitada y un token con acceso a esas cuentas.
+Configurá permisos y acceso según la [documentación de Meta](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/).
+En X necesitás una app, credenciales OAuth 1.0a de usuario con lectura/escritura y acceso
+habilitado a los endpoints usados. Los permisos, cuotas y costos dependen de cada plataforma.
 
----
+Copiá `.env.example` a `.env` (`Copy-Item .env.example .env` en PowerShell o
+`cp .env.example .env` en Bash) y completá:
 
-## 🚀 Puesta en Marcha Local
+| Variable | Uso |
+| --- | --- |
+| `META_ACCESS_TOKEN` | Token de Meta; obligatorio incluso en dry-run. |
+| `META_GRAPH_API_VERSION` | Versión de Graph; por defecto `v25.0`, configurable. |
+| `IG_ACCOUNT_IDS` | IDs numéricos separados por comas; al menos una cuenta. |
+| `IG_MN_AGENT_ID`, `IG_MN_FEDERAL_ID` | Aliases opcionales del caso de uso original; se deduplican con la lista. |
+| `TWITTER_API_KEY`, `TWITTER_API_SECRET` | Credenciales de la app de X; solo obligatorias en modo real. |
+| `TWITTER_ACCESS_TOKEN`, `TWITTER_ACCESS_SECRET` | Credenciales de usuario de X; un único destino para todas las cuentas. |
+| `DRY_RUN` | `true` o `false`; por defecto `false`. `--dry-run` activa siempre el preview. |
 
-### Prerrequisitos
-- Node.js >= 18
-- Cuenta de Meta for Developers con permisos `instagram_basic` y `pages_read_engagement`
-- Cuenta de desarrollador de X (Twitter Developer Portal) con permisos de lectura y escritura (Read and Write)
+Nunca versiones `.env`. El estado contiene IDs, usernames y fechas, pero no tokens.
+En un repositorio público esos metadatos también son públicos. El preview imprime captions
+en los logs: usalo solo con contenido que pueda verse en ese entorno.
 
-### 1. Clonar e Instalar Dependencias
 ```bash
-git clone https://github.com/tu-usuario/ig-x-sync.git
-cd ig-x-sync
-npm install
+npm run dry-run
+# Para publicar tras revisar el preview, cambiá DRY_RUN=false en .env.
+npm run build
+npm start
 ```
 
-### 2. Configurar Variables de Entorno
-Copiá el archivo de ejemplo y completá tus credenciales:
-```bash
-cp .env.example .env
-```
+## Comandos de desarrollo
 
-Campos requeridos en `.env`:
-```ini
-# Meta Graph API
-META_ACCESS_TOKEN=tu_token_de_meta
-META_GRAPH_API_VERSION=v25.0
-IG_MN_AGENT_ID=tu_instagram_account_id_1
-IG_MN_FEDERAL_ID=tu_instagram_account_id_2
+| Comando | Función |
+| --- | --- |
+| `npm run demo` | Demostración offline con datos ficticios y estado temporal. |
+| `npm run dry-run` | Preview con Meta real, sin acceder a X ni cambiar el estado. |
+| `npm run dev` | Ejecutar con ts-node; respeta `DRY_RUN`. |
+| `npm run typecheck` | Verificación de tipos. |
+| `npm test` | Build y suite automatizada. |
+| `npm run test:coverage` | Suite con cobertura y mínimos de 90% líneas, 80% ramas y 85% funciones. |
+| `npm run build` / `npm start` | Compilar / ejecutar; respeta `DRY_RUN`. |
+| `npm run recover -- ...` | Resolver una publicación incierta tras verificar X; ver la guía operativa. |
 
-# X (Twitter) API
-TWITTER_API_KEY=tu_api_key
-TWITTER_API_SECRET=tu_api_secret
-TWITTER_ACCESS_TOKEN=tu_access_token
-TWITTER_ACCESS_SECRET=tu_access_secret
-```
+## GitHub Actions
 
-### 3. Comandos Disponibles
+`ci.yml` verifica tipos, pruebas y cobertura en Linux/Windows con Node 22/24. También
+valida los workflows con actionlint y consulta avisos de npm. No recibe credenciales de
+publicación. Dependabot propone actualizaciones de npm y de Actions.
 
-| Comando | Descripción |
-|---|---|
-| `npm run dry-run` | **Modo Prueba:** Consulta las cuentas, resuelve imágenes y simula el tweet sin publicar ni consumir cuota en X. |
-| `npm run dev` | Ejecuta la sincronización completa en modo desarrollo con `ts-node`. |
-| `npm run typecheck` | Ejecuta el análisis estático de tipos con TypeScript (`tsc --noEmit`). |
-| `npm run build` | Compila el proyecto a JavaScript estándar en `./dist`. |
-| `npm start` | Ejecuta el artefacto compilado para producción (`node dist/index.js`). |
+`sync.yml` opera exclusivamente en la rama por defecto y serializa las ejecuciones.
+El cron está definido cada 30 minutos (minutos 7 y 37), pero queda **deshabilitado hasta
+configurar la variable de repositorio `SYNC_ENABLED=true`**. El despacho manual usa
+`dry_run=true` por defecto. No se activa la publicación al hacer push de esta auditoría.
 
----
+Para habilitarlo después de integrar los cambios:
 
-## ☁️ Despliegue Automatizado (GitHub Actions)
+1. Agregá los secrets de la tabla anterior en Settings > Secrets and variables > Actions. La versión de Graph es una variable, no un secret.
+2. Asegurá que el bot tenga `contents: write` y permiso de push sobre la rama de estado. Una regla de protección que lo impida hará fallar el checkpoint **antes** de crear el post en X.
+3. Ejecutá un despacho manual con `dry_run=true` y revisá el resultado.
+4. Ejecutá manualmente con `dry_run=false` cuando quieras publicar; activá `SYNC_ENABLED=true` si también querés el cron.
 
-El repositorio incluye un workflow en `.github/workflows/sync.yml` preparado para:
-1. Ejecutarse automáticamente cada 30 minutos mediante `cron`.
-2. Permitir ejecuciones manuales desde la pestaña **Actions** de GitHub con selector de modo `dry_run`.
-3. Guardar el estado actualizado en `data/sync-state.json` mediante un commit desatendido (`[skip ci]`).
+Guarda el estado antes/después de cada creación en X, intenta persistir también tras
+fallos parciales y conserva un artefacto de respaldo por 7 días. Los commits del bot usan
+`[skip ci]`. Los horarios de GitHub no son una garantía de puntualidad; costos y límites
+de Actions y APIs deben revisarse para la cuenta concreta.
 
-### Configuración en GitHub:
-1. Andá a tu repositorio en GitHub > **Settings** > **Secrets and variables** > **Actions**.
-2. Creá los siguientes Repository Secrets:
-   - `META_ACCESS_TOKEN`
-   - `IG_MN_AGENT_ID`
-   - `IG_MN_FEDERAL_ID`
-   - `TWITTER_API_KEY`
-   - `TWITTER_API_SECRET`
-   - `TWITTER_ACCESS_TOKEN`
-   - `TWITTER_ACCESS_SECRET`
+## Operación, auditoría y límites
 
----
+- [Guía de recuperación y diagnóstico](docs/OPERATIONS.md): publicación incierta, locks, estado corrupto y fallos de push.
+- [Auditoría y plan por etapas](docs/AUDIT.md): hallazgos, prioridad, correcciones, verificaciones y límites.
+- [Reglas de conteo de X](https://docs.x.com/fundamentals/counting-characters) y [media de X](https://docs.x.com/x-api/media/upload-media). El proyecto conserva upload v1.1 + creación v2; X también ofrece endpoints de carga v2.
 
-## 🛡️ Licencia
-Distribuido bajo licencia ISC.
+La auditoría no incluyó publicaciones reales ni validó créditos, permisos o vigencia de
+los tokens. El historial JSON crece con los posts sincronizados; el diseño apunta a pocas
+cuentas y bajo volumen. La librería oficial `twitter-text` usa una dependencia core-js 2
+deprecada; está registrada como deuda de mantenimiento. Un resultado limpio de `npm audit`
+solo refleja los avisos conocidos al momento de la consulta.
+
+Licencia [ISC](LICENSE).

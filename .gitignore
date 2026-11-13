@@ -3,6 +3,10 @@ node_modules/
 
 # Credenciales y variables de entorno (¡CRÍTICO!)
 .env
+.env.*
+!.env.example
+data/*.lock
+data/*.tmp
 
 # Archivos compilados de TypeScript
 dist/

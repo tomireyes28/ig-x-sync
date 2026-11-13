@@ -1,101 +1,46 @@
-import dotenv from 'dotenv';
-
-dotenv.config();
-
-export interface InstagramAccountConfig {
-  id: string;
-  label: string;
-}
-
+import { SafeError } from '../utils/errors';
+export interface InstagramAccountConfig { id: string; label: string }
+export interface TwitterCredentials { apiKey: string; apiSecret: string; accessToken: string; accessSecret: string }
 export interface AppConfig {
-  meta: {
-    accessToken: string;
-    apiVersion: string;
-    accounts: InstagramAccountConfig[];
-  };
-  twitter: {
-    apiKey: string;
-    apiSecret: string;
-    accessToken: string;
-    accessSecret: string;
-  };
+  dryRun: boolean;
+  meta: { accessToken: string; apiVersion: string; accounts: InstagramAccountConfig[] };
+  twitter?: TwitterCredentials;
 }
 
-/**
- * Validates that all required environment variables are present and non-empty.
- * Fails fast on startup with a clear error message if any credential is missing.
- */
-const validateEnv = (requiredKeys: string[]): void => {
-  const missing = requiredKeys.filter((key) => !process.env[key]?.trim());
-
-  if (missing.length > 0) {
-    throw new Error(
-      `❌ Faltan variables de entorno obligatorias en el archivo .env: ${missing.join(', ')}`
-    );
+/** Pure configuration parsing: importing a module never reads credentials or starts clients. */
+export const loadConfig = (
+  env: NodeJS.ProcessEnv = process.env, args: string[] = process.argv.slice(2),
+): AppConfig => {
+  if (args.some(arg => arg !== '--dry-run')) throw new SafeError('Argumento desconocido. Uso: npm start -- [--dry-run]');
+  if (env.DRY_RUN !== undefined && !['true', 'false'].includes(env.DRY_RUN.trim())) {
+    throw new SafeError('DRY_RUN debe ser true o false.');
   }
-};
-
-/**
- * Resolves the list of Instagram Business accounts to synchronize.
- * Supports both named agency accounts (IG_MN_AGENT_ID, IG_MN_FEDERAL_ID)
- * and a comma-separated IG_ACCOUNT_IDS list for extensibility.
- */
-const resolveInstagramAccounts = (): InstagramAccountConfig[] => {
+  const dryRun = args.includes('--dry-run') || env.DRY_RUN?.trim() === 'true';
+  const required = (key: string): string => {
+    const value = env[key]?.trim();
+    if (!value) throw new SafeError(`Falta la variable obligatoria ${key}.`);
+    return value;
+  };
+  const apiVersion = env.META_GRAPH_API_VERSION?.trim() || 'v25.0';
+  if (!/^v\d+\.\d+$/.test(apiVersion)) throw new SafeError('META_GRAPH_API_VERSION debe tener formato vNN.N.');
   const accounts: InstagramAccountConfig[] = [];
-
-  if (process.env.IG_MN_AGENT_ID?.trim()) {
-    accounts.push({
-      id: process.env.IG_MN_AGENT_ID.trim(),
-      label: 'MN Agent',
-    });
-  }
-
-  if (process.env.IG_MN_FEDERAL_ID?.trim()) {
-    accounts.push({
-      id: process.env.IG_MN_FEDERAL_ID.trim(),
-      label: 'MN Federal',
-    });
-  }
-
-  if (process.env.IG_ACCOUNT_IDS?.trim()) {
-    const extraIds = process.env.IG_ACCOUNT_IDS.split(',')
-      .map((id) => id.trim())
-      .filter(Boolean);
-
-    for (const id of extraIds) {
-      if (!accounts.some((acc) => acc.id === id)) {
-        accounts.push({ id, label: `IG Account (${id})` });
-      }
-    }
-  }
-
-  if (accounts.length === 0) {
-    throw new Error(
-      '❌ No se configuró ninguna cuenta de Instagram. Definí IG_MN_AGENT_ID, IG_MN_FEDERAL_ID o IG_ACCOUNT_IDS en tu .env.'
-    );
-  }
-
-  return accounts;
+  const addAccount = (input: string | undefined, label: string): void => {
+    const id = input?.trim();
+    if (!id) return;
+    if (!/^\d+$/.test(id)) throw new SafeError('Los IDs de Instagram deben contener solo dígitos.');
+    if (!accounts.some(account => account.id === id)) accounts.push({ id, label });
+  };
+  addAccount(env.IG_MN_AGENT_ID, 'MN Agent');
+  addAccount(env.IG_MN_FEDERAL_ID, 'MN Federal');
+  for (const id of env.IG_ACCOUNT_IDS?.split(',') ?? []) addAccount(id, 'Instagram');
+  if (!accounts.length) throw new SafeError('Configurá al menos una cuenta con IG_ACCOUNT_IDS o los aliases IG_MN_*.');
+  return {
+    dryRun,
+    meta: { accessToken: required('META_ACCESS_TOKEN'), apiVersion, accounts },
+    ...(!dryRun ? { twitter: {
+      apiKey: required('TWITTER_API_KEY'), apiSecret: required('TWITTER_API_SECRET'),
+      accessToken: required('TWITTER_ACCESS_TOKEN'), accessSecret: required('TWITTER_ACCESS_SECRET'),
+    } } : {}),
+  };
 };
 
-validateEnv([
-  'META_ACCESS_TOKEN',
-  'TWITTER_API_KEY',
-  'TWITTER_API_SECRET',
-  'TWITTER_ACCESS_TOKEN',
-  'TWITTER_ACCESS_SECRET',
-]);
-
-export const config: AppConfig = {
-  meta: {
-    accessToken: process.env.META_ACCESS_TOKEN!.trim(),
-    apiVersion: process.env.META_GRAPH_API_VERSION?.trim() || 'v25.0',
-    accounts: resolveInstagramAccounts(),
-  },
-  twitter: {
-    apiKey: process.env.TWITTER_API_KEY!.trim(),
-    apiSecret: process.env.TWITTER_API_SECRET!.trim(),
-    accessToken: process.env.TWITTER_ACCESS_TOKEN!.trim(),
-    accessSecret: process.env.TWITTER_ACCESS_SECRET!.trim(),
-  },
-};
