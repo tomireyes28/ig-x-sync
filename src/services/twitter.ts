@@ -1,20 +1,29 @@
 import { TwitterApi } from 'twitter-api-v2';
-import { config } from '../config';
-import { downloadImageAsBuffer } from '../utils/image';
+import type { TwitterCredentials } from '../config';
+import { downloadImageAsBuffer, type DownloadedImage } from '../utils/image';
 import { formatTweetCaption } from '../utils/caption';
-export { formatTweetCaption } from '../utils/caption';
 
-const client = new TwitterApi({ appKey: config.twitter.apiKey, appSecret: config.twitter.apiSecret,
-  accessToken: config.twitter.accessToken, accessSecret: config.twitter.accessSecret });
+export interface PreparedTweet { mediaId: string; text: string }
+export interface TwitterPort {
+  v1: { uploadMedia(buffer: Buffer, options: { mimeType: string }): Promise<string> };
+  v2: { tweet(payload: { text: string; media: { media_ids: [string] } }): Promise<{ data: { id: string } }> };
+}
 
-export const prepareTweet = async (imageUrl: string, caption: string): Promise<{ mediaId: string; text: string }> => {
-  const text = formatTweetCaption(caption);
-  const { buffer, mimeType } = await downloadImageAsBuffer(imageUrl);
-  const mediaId = await client.v1.uploadMedia(buffer, { mimeType });
-  return { mediaId, text };
-};
-
-export const publishTweet = async (prepared: { mediaId: string; text: string }): Promise<{ id: string }> => {
-  const response = await client.v2.tweet({ text: prepared.text, media: { media_ids: [prepared.mediaId] } });
-  return response.data;
-};
+export const createTwitterService = (
+  credentials: TwitterCredentials,
+  client: TwitterPort = new TwitterApi({ appKey: credentials.apiKey, appSecret: credentials.apiSecret,
+    accessToken: credentials.accessToken, accessSecret: credentials.accessSecret }),
+  download: (url: string) => Promise<DownloadedImage> = downloadImageAsBuffer,
+) => ({
+  async prepareTweet(imageUrl: string, caption: string): Promise<PreparedTweet> {
+    const text = formatTweetCaption(caption);
+    const { buffer, mimeType } = await download(imageUrl);
+    const mediaId = await client.v1.uploadMedia(buffer, { mimeType });
+    return { mediaId, text };
+  },
+  async publishTweet(prepared: PreparedTweet): Promise<{ id: string }> {
+    const response = await client.v2.tweet({ text: prepared.text, media: { media_ids: [prepared.mediaId] } });
+    if (!/^\d+$/.test(response.data?.id ?? '')) throw new Error('X devolvió un resultado de publicación inválido.');
+    return response.data;
+  },
+});
