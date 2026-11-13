@@ -32,6 +32,18 @@ test('compiled checkpoint command refuses a missing remote branch', t => {
   assert.match(result.stderr, /Rama inválida/);
 });
 
+test('offline demo demonstrates catch-up and ambiguity without touching workspace state', t => {
+  const cwd = fixture(t);
+  const file = path.join(cwd, 'data/sync-state.json');
+  fs.mkdirSync(path.dirname(file));
+  fs.writeFileSync(file, 'workspace state must remain unchanged');
+  const result = run('demo.js', [], cwd);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Demo completada: 6 intentos simulados/);
+  assert.match(result.stdout, /Cuenta bloqueada/);
+  assert.equal(fs.readFileSync(file, 'utf8'), 'workspace state must remain unchanged');
+});
+
 test('compiled recovery confirms an uncertain tweet and retains history', t => {
   const cwd = fixture(t);
   const file = path.join(cwd, 'data/sync-state.json');

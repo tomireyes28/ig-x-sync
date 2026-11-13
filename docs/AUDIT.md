@@ -61,7 +61,43 @@ La protección de rama puede impedir el push de estado del bot y debe documentar
 - Se buscaron los cinco valores secretos configurados localmente en las 15
   revisiones alcanzables al cierre de A07: cero archivos coincidentes. Esto no
   reemplaza una revisión de credenciales antiguas/revocadas ni un secret scanner.
-- Etapa 3: pendiente.
+- Etapa 3 (A09–A12): implementada. Se agregó checkpoint remoto antes de crear
+  cada post en X, confirmación posterior, respaldo de estado tras fallos parciales,
+  serialización y cron opt-in. Se verificó el timeout nativo del SDK de X.
+  Se incorporaron CI, dependabot, actionlint, guía de recuperación, licencia ISC,
+  metadatos del paquete y una demo completamente offline.
+
+### Verificación final local
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm ci` | Instalación reproducible correcta. |
+| `npm run typecheck` / build | Correctos con Node 22.17.0 y tipos Node 22. |
+| `npm run test:coverage` | 37 pruebas, cero fallos y cero omitidas. |
+| Cobertura instrumentada de `dist/**` | 97,86% líneas; 89,57% ramas; 89,06% funciones. |
+| `npm run demo` | Correcta, seis intentos ficticios; estado real intacto. |
+| `npm audit --audit-level=low` | Cero vulnerabilidades conocidas en la consulta final. |
+| actionlint 1.7.12 | Ambos workflows válidos; binario oficial verificado por SHA256. |
+| `git diff --check` | Correcto. |
+
+Las pruebas incluyen un remoto Git temporal real: se verifican commit/push del estado,
+conservación de cambios ajenos preparados y rechazo de un conflicto remoto. CI ejecuta
+la suite en Linux/Windows y Node 22/24; sus resultados remotos se consultan en
+[GitHub Actions](https://github.com/tomireyes28/ig-x-sync/actions/workflows/ci.yml).
+Los porcentajes miden código compilado instrumentado, no publicaciones reales ni
+garantías de disponibilidad. No se ejecutó el workflow de sincronización real.
+
+### Entrega y trabajo que requiere un entorno real
+
+Los doce hallazgos tienen correcciones y commits identificados con `[A01]` a `[A12]`.
+La rama de entrega es `codex/portfolio-audit`, con un push por cada una de las tres
+etapas. La integración en `main` queda separada de esta entrega: no se hizo merge
+ni se cambió la configuración de cuentas o secrets en GitHub.
+
+Antes de habilitar publicaciones se debe ejecutar un dry-run con Meta y verificar
+permisos, acceso a los endpoints de X, créditos y reglas de push. El cron de la versión
+revisada exige `SYNC_ENABLED=true`. No se modificó el workflow anterior de `main`
+durante la auditoría: hasta integrar esta rama, esa rama conserva su comportamiento.
 
 ## Referencias técnicas consultadas
 
