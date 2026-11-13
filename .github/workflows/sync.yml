@@ -71,7 +71,7 @@ jobs:
         if: >-
           always() && env.DRY_RUN == 'false' &&
           (steps.sync.outcome == 'success' || steps.sync.outcome == 'failure' || steps.sync.outcome == 'cancelled')
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sync-state-${{ github.run_id }}-${{ github.run_attempt }}
           path: data/sync-state.json
