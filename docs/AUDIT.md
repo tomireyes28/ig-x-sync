@@ -24,6 +24,7 @@ avisos del registro, no demuestra explotación en esta aplicación.
 | A09 | Alta | Actions no guarda éxitos parciales si falla el proceso; no serializa ejecuciones. | Guardado incluso tras fallo, concurrency, rama explícita, artefacto de respaldo y dry-run seguro. |
 | A10 | Media | Sin suite de pruebas ni CI para pull requests. | Pruebas aisladas sin credenciales, typecheck/build/audit en CI, runtime coherente. |
 | A11 | Media | README dice production-ready/idempotente/gratis sin explicar límites, clon placeholder y licencia sin archivo. | Documentación verificable, demo offline, operación/recuperación y licencia ISC. |
+| A12 | Media | La revisión del SDK durante la etapa 3 confirmó que X no tenía timeout configurado. Una petición trabada podía bloquear las demás cuentas. | Timeout nativo de 15 s por petición X, verificado en los hooks del SDK real sin contactar la red. |
 
 ## Etapas y estrategia Git
 
@@ -34,7 +35,7 @@ inicial. Se trabajará en una rama `codex/` y se hará un push al cerrar cada et
    reejecuciones, aislamiento por cuenta y resultados inciertos antes del push.
 2. **Contenido y seguridad:** A04, A05, A06, A07, A08. Validar Unicode,
    imágenes, entorno, redacción de errores y dependencias antes del push.
-3. **Entrega profesional:** A09, A10, A11. Validar workflows, instalación,
+3. **Entrega profesional:** A09, A12 (hallazgo adicional), A10, A11. Validar workflows, instalación,
    suite completa y demo; actualizar resultados de esta auditoría antes del push.
 
 ## Límites de la verificación

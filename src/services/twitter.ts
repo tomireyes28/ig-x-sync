@@ -1,5 +1,5 @@
 import { SafeError } from '../utils/errors';
-import { TwitterApi } from 'twitter-api-v2';
+import { TwitterApi, type ITwitterApiClientPlugin } from 'twitter-api-v2';
 import type { TwitterCredentials } from '../config';
 import { downloadImageAsBuffer, type DownloadedImage } from '../utils/image';
 import { formatTweetCaption } from '../utils/caption';
@@ -10,10 +10,15 @@ export interface TwitterPort {
   v2: { tweet(payload: { text: string; media: { media_ids: [string] } }): Promise<{ data: { id: string } }> };
 }
 
+/** Configure the SDK's native timeout handler, which destroys timed-out requests. */
+export const xRequestTimeout: ITwitterApiClientPlugin = {
+  onBeforeRequestConfig: ({ params }) => { params.timeout = 15_000; },
+};
+
 export const createTwitterService = (
   credentials: TwitterCredentials,
   client: TwitterPort = new TwitterApi({ appKey: credentials.apiKey, appSecret: credentials.apiSecret,
-    accessToken: credentials.accessToken, accessSecret: credentials.accessSecret }),
+    accessToken: credentials.accessToken, accessSecret: credentials.accessSecret }, { plugins: [xRequestTimeout] }),
   download: (url: string) => Promise<DownloadedImage> = downloadImageAsBuffer,
 ) => ({
   async prepareTweet(imageUrl: string, caption: string): Promise<PreparedTweet> {
