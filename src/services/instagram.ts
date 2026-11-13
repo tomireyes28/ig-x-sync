@@ -24,9 +24,9 @@ export const resolveSyncablePost = (media: InstagramMedia): SyncableInstagramPos
   let imageUrl: string | undefined;
   if (media.media_type === 'IMAGE') imageUrl = media.media_url;
   if (media.media_type === 'CAROUSEL_ALBUM') {
-    imageUrl = media.children?.data.find(child => child.media_type === 'IMAGE' && child.media_url)?.media_url || media.media_url;
+    imageUrl = media.children?.data.find(child => child.media_type === 'IMAGE' && child.media_url)?.media_url;
   }
-  if (!imageUrl || media.media_type === 'VIDEO') return null;
+  if (typeof imageUrl !== 'string' || !imageUrl || media.media_type === 'VIDEO') return null;
   return { id: media.id, imageUrl, caption: media.caption?.trim() || '',
     mediaType: media.media_type, permalink: media.permalink, timestamp: media.timestamp };
 };
