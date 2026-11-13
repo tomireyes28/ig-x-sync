@@ -97,3 +97,28 @@ test('failed preparation does not mark pending or advance checkpoint', async t =
   assert.equal(deps.state.getAccount('1'), undefined);
   assert.deepEqual(deps.published, []);
 });
+
+test('remote pending checkpoint must succeed before any X creation', async t => {
+  const deps = dependencies(t, [media('11')]);
+  deps.checkpoint = async () => { throw new Error('push rejected'); };
+  assert.equal((await runSync([account], deps, false)).failures, 1);
+  assert.deepEqual(deps.published, []);
+  assert.equal(deps.state.getAccount('1').pendingPost.postId, '11');
+});
+
+test('remote checkpoints bracket creation; partial failure leaves next run blocked', async t => {
+  const deps = dependencies(t, [media('12'), media('11')]);
+  const events = [];
+  deps.checkpoint = async () => {
+    events.push(deps.state.getAccount('1').pendingPost ? 'pending' : 'confirmed');
+  };
+  deps.publish = async prepared => {
+    events.push(`create:${prepared.mediaId}`);
+    if (prepared.mediaId === '12') throw new Error('unknown');
+    return { id: '99' };
+  };
+  assert.deepEqual(await runSync([account], deps, false), { failures: 1, published: 1 });
+  assert.deepEqual(events, ['pending', 'create:11', 'confirmed', 'pending', 'create:12']);
+  assert.equal(deps.state.has('1', '11'), true);
+  assert.equal(deps.state.getAccount('1').pendingPost.postId, '12');
+});

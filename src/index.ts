@@ -7,6 +7,7 @@ import { formatTweetCaption } from './utils/caption';
 import { createStateStore } from './utils/state';
 import { runSync } from './sync';
 import { withStateLock } from './utils/lock';
+import { createRemoteCheckpoint } from './utils/checkpoint';
 
 const main = async (): Promise<void> => {
   dotenv.config({ quiet: true });
@@ -14,6 +15,8 @@ const main = async (): Promise<void> => {
   const state = createStateStore();
   const instagram = createInstagramService(config.meta);
   const twitter = config.twitter ? createTwitterService(config.twitter) : undefined;
+  const checkpoint = process.env.GITHUB_ACTIONS === 'true' && !config.dryRun
+    ? createRemoteCheckpoint(process.env.STATE_PUSH_BRANCH ?? '') : undefined;
   const result = await runSync(config.meta.accounts, {
     state, fetchFeed: instagram.fetchAccountFeed,
     prepare: post => {
@@ -24,7 +27,7 @@ const main = async (): Promise<void> => {
       if (!twitter) throw new SafeError('No hay un cliente X configurado.');
       return twitter.publishTweet(prepared);
     },
-    preview: formatTweetCaption, log: console.log,
+    preview: formatTweetCaption, log: console.log, checkpoint,
   }, config.dryRun);
   console.log(`Finalizado: ${result.published} publicaciones, ${result.failures} errores.`);
   if (result.failures) process.exitCode = 1;

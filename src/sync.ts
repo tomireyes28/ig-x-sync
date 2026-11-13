@@ -10,6 +10,7 @@ export interface SyncDependencies {
   publish(prepared: { mediaId: string; text: string }): Promise<{ id: string }>;
   preview(caption: string): string;
   log(message: string): void;
+  checkpoint?(): Promise<void>;
 }
 
 export const runSync = async (
@@ -39,11 +40,13 @@ export const runSync = async (
         // Do not automatically retry after this boundary: the remote outcome may be unknown.
         stage = 'registro previo de estado';
         deps.state.begin(account.id, post.id);
+        await deps.checkpoint?.();
         stage = 'creación en X';
         const tweet = await deps.publish(prepared);
         stage = 'confirmación de estado';
         deps.state.mark(account.id, { lastPostId: post.id, lastTweetId: tweet.id,
           lastSyncedAt: new Date().toISOString(), username: feed.username });
+        await deps.checkpoint?.();
         published++;
         deps.log(`Publicado ${post.id}: https://x.com/i/web/status/${tweet.id}`);
       }
