@@ -51,4 +51,22 @@ La protección de rama puede impedir el push de estado del bot y debe documentar
   migración del estado previo, historial, paginación, límite de recorrido,
   orden de publicación, dry-run, aislamiento de cuentas, exclusión local y
   publicación incierta con recuperación.
-- Etapas 2 y 3: pendientes.
+- Etapa 2 (A04–A08): implementada; 26 pruebas pasan. Axios se actualizó a
+  1.21.1, follow-redirects a 1.16.3 y form-data a 4.0.6. Se retiró nodemon
+  (y con él minimatch/brace-expansion). `npm audit` informa cero vulnerabilidades.
+  La biblioteca oficial twitter-text arrastra core-js 2 deprecado: se conserva
+  por compatibilidad y se registra como deuda de mantenimiento, sin avisos de
+  seguridad reportados por npm en esta revisión.
+- Se buscaron los cinco valores secretos configurados localmente en las 15
+  revisiones alcanzables al cierre de A07: cero archivos coincidentes. Esto no
+  reemplaza una revisión de credenciales antiguas/revocadas ni un secret scanner.
+- Etapa 3: pendiente.
+
+## Referencias técnicas consultadas
+
+- [X: conteo ponderado y twitter-text](https://docs.x.com/fundamentals/counting-characters).
+- [X: carga de media y límite de imágenes](https://docs.x.com/x-api/media/upload-media).
+- [Colección oficial de Meta](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api).
+  La documentación web de developers.facebook.com devolvió HTTP 429 durante
+  esta revisión. La integración concreta sigue requiriendo validación con una
+  cuenta autorizada.
