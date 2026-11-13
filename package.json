@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Automated multi-account Instagram Business to X (Twitter) synchronization service built with TypeScript, Meta Graph API, and X API v1.1/v2.",
   "main": "dist/index.js",
+  "engines": {
+    "node": "^22.17.0 || ^24.0.0"
+  },
   "scripts": {
     "dev": "ts-node src/index.ts",
     "dry-run": "ts-node src/index.ts --dry-run",
@@ -10,6 +13,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.cjs",
+    "test:coverage": "npm run build && node --test --experimental-test-coverage --test-coverage-include=dist/** --test-coverage-lines=90 --test-coverage-branches=80 --test-coverage-functions=85 tests/*.test.cjs",
     "recover": "ts-node src/recover.ts"
   },
   "keywords": [
@@ -30,7 +34,7 @@
     "twitter-text": "^3.1.0"
   },
   "devDependencies": {
-    "@types/node": "^25.6.0",
+    "@types/node": "^22.20.5",
     "@types/twitter-text": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
