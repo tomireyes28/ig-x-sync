@@ -1,3 +1,4 @@
+import { SafeError, describeError } from './utils/errors';
 import { createStateStore } from './utils/state';
 import { withStateLock } from './utils/lock';
 
@@ -7,10 +8,10 @@ const recover = async (): Promise<void> => {
   const [flag, accountId, action, tweetId] = args;
   if (flag !== '--account' || !/^\d+$/.test(accountId ?? '') ||
       !((action === '--tweet' && /^\d+$/.test(tweetId ?? '') && args.length === 4) ||
-        (action === '--not-published' && args.length === 3))) throw new Error(usage);
+        (action === '--not-published' && args.length === 3))) throw new SafeError(usage);
   const state = createStateStore();
   const record = state.getAccount(accountId);
-  if (!record?.pendingPost) throw new Error('No hay una publicación incierta para esa cuenta.');
+  if (!record?.pendingPost) throw new SafeError('No hay una publicación incierta para esa cuenta.');
   if (action === '--tweet') state.mark(accountId, {
     lastPostId: record.pendingPost.postId, lastTweetId: tweetId,
     lastSyncedAt: new Date().toISOString(), username: record.username,
@@ -20,6 +21,7 @@ const recover = async (): Promise<void> => {
 };
 
 withStateLock(recover).catch(error => {
-  console.error(error instanceof Error ? error.message : usage);
+  console.error(describeError(error));
   process.exitCode = 1;
 });
+

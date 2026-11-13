@@ -1,3 +1,4 @@
+import { SafeError } from '../utils/errors';
 import axios, { AxiosInstance } from 'axios';
 
 export type InstagramMediaType = 'IMAGE' | 'VIDEO' | 'CAROUSEL_ALBUM';
@@ -54,13 +55,13 @@ export const createInstagramService = (
       const response = await http.get<MediaPage>(`${base}/media`, {
         ...options, params: { fields: MEDIA_FIELDS, limit: 50, ...(after ? { after } : {}) },
       });
-      if (!Array.isArray(response.data?.data)) throw new Error('Respuesta de medios de Meta inválida.');
+      if (!Array.isArray(response.data?.data)) throw new SafeError('Respuesta de medios de Meta inválida.');
       for (const media of response.data.data) {
         if (!media || typeof media.id !== 'string' || !/^\d+$/.test(media.id) ||
             !['IMAGE', 'VIDEO', 'CAROUSEL_ALBUM'].includes(media.media_type) ||
             (media.caption !== undefined && typeof media.caption !== 'string') ||
             (media.children !== undefined && !Array.isArray(media.children?.data))) {
-          throw new Error('Publicación de Meta inválida.');
+          throw new SafeError('Publicación de Meta inválida.');
         }
         if (media.id === checkpoint) return { username: metadata.data.username || accountId,
           mediaCount: metadata.data.media_count ?? 0, posts };
@@ -73,13 +74,14 @@ export const createInstagramService = (
         };
       }
       if (!response.data.paging?.next) {
-        if (checkpoint) throw new Error('No se encontró el último post sincronizado; requiere revisión manual.');
+        if (checkpoint) throw new SafeError('No se encontró el último post sincronizado; requiere revisión manual.');
         return { username: metadata.data.username || accountId, mediaCount: metadata.data.media_count ?? 0, posts };
       }
       after = response.data.paging.cursors?.after;
-      if (!after || cursors.has(after)) throw new Error('Paginación de Meta inválida o repetida.');
+      if (!after || cursors.has(after)) throw new SafeError('Paginación de Meta inválida o repetida.');
       cursors.add(after);
     }
-    throw new Error('Se alcanzó el límite de 20 páginas sin resolver la continuidad del feed.');
+    throw new SafeError('Se alcanzó el límite de 20 páginas sin resolver la continuidad del feed.');
   },
 });
+

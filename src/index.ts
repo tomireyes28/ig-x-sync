@@ -1,3 +1,4 @@
+import { SafeError, describeError } from './utils/errors';
 import dotenv from 'dotenv';
 import { loadConfig } from './config';
 import { createInstagramService } from './services/instagram';
@@ -16,11 +17,11 @@ const main = async (): Promise<void> => {
   const result = await runSync(config.meta.accounts, {
     state, fetchFeed: instagram.fetchAccountFeed,
     prepare: post => {
-      if (!twitter) throw new Error('No hay un cliente X configurado.');
+      if (!twitter) throw new SafeError('No hay un cliente X configurado.');
       return twitter.prepareTweet(post.imageUrl, post.caption);
     },
     publish: prepared => {
-      if (!twitter) throw new Error('No hay un cliente X configurado.');
+      if (!twitter) throw new SafeError('No hay un cliente X configurado.');
       return twitter.publishTweet(prepared);
     },
     preview: formatTweetCaption, log: console.log,
@@ -29,7 +30,8 @@ const main = async (): Promise<void> => {
   if (result.failures) process.exitCode = 1;
 };
 
-withStateLock(main).catch(() => {
-  console.error('No se pudo iniciar la sincronización. Revisá configuración y estado.');
+withStateLock(main).catch(error => {
+  console.error(`No se pudo iniciar: ${describeError(error)}`);
   process.exitCode = 1;
 });
+

@@ -1,3 +1,4 @@
+import { SafeError } from './errors';
 import axios, { AxiosInstance } from 'axios';
 
 export interface DownloadedImage { buffer: Buffer; mimeType: 'image/jpeg' | 'image/png' | 'image/webp' }
@@ -9,7 +10,7 @@ const validateImageUrl = (input: string): void => {
     domain => url.hostname === domain || url.hostname.endsWith(`.${domain}`),
   );
   if (url.protocol !== 'https:' || !trustedHost || url.username || url.password || url.port) {
-    throw new Error('La imagen debe usar HTTPS y un CDN de Instagram/Meta permitido.');
+    throw new SafeError('La imagen debe usar HTTPS y un CDN de Instagram/Meta permitido.');
   }
 };
 
@@ -32,10 +33,11 @@ export const downloadImageAsBuffer = async (
     maxRedirects: 0,
   });
   const buffer = Buffer.from(response.data);
-  if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) throw new Error('Imagen vacía o mayor a 5 MB.');
+  if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) throw new SafeError('Imagen vacía o mayor a 5 MB.');
   const header = response.headers['content-type'];
   const declaredMime = typeof header === 'string' ? header.split(';')[0].trim().toLowerCase() : undefined;
   const mimeType = detectMime(buffer);
-  if (!mimeType || declaredMime !== mimeType) throw new Error('Formato de imagen no admitido o MIME inconsistente.');
+  if (!mimeType || declaredMime !== mimeType) throw new SafeError('Formato de imagen no admitido o MIME inconsistente.');
   return { buffer, mimeType };
 };
+

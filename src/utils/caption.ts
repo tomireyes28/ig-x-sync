@@ -1,3 +1,4 @@
+import { SafeError } from './errors';
 import { extractUrlsWithIndices, hasInvalidCharacters, parseTweet } from 'twitter-text';
 
 const segmenter = new Intl.Segmenter('es', { granularity: 'grapheme' });
@@ -5,10 +6,10 @@ const segmenter = new Intl.Segmenter('es', { granularity: 'grapheme' });
 /** Keep URLs and graphemes intact while applying X's weighted character rules. */
 export const formatTweetCaption = (caption: string, maxLength = 280): string => {
   if (!Number.isInteger(maxLength) || maxLength < 4 || maxLength > 280) {
-    throw new Error('El límite del caption debe ser un entero entre 4 y 280.');
+    throw new SafeError('El límite del caption debe ser un entero entre 4 y 280.');
   }
   const normalized = caption.trim().normalize('NFC') || 'Nueva actualización';
-  if (hasInvalidCharacters(normalized)) throw new Error('El caption contiene caracteres no admitidos por X.');
+  if (hasInvalidCharacters(normalized)) throw new SafeError('El caption contiene caracteres no admitidos por X.');
   if (parseTweet(normalized).weightedLength <= maxLength) return normalized;
 
   const tokens: string[] = [];
@@ -26,3 +27,4 @@ export const formatTweetCaption = (caption: string, maxLength = 280): string => 
   }
   return `${text.trimEnd()}...`;
 };
+

@@ -1,3 +1,4 @@
+import { SafeError } from './errors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -20,7 +21,7 @@ const isDate = (value: unknown): value is string =>
   typeof value === 'string' && Number.isFinite(Date.parse(value));
 
 const validateState = (parsed: unknown): SyncStateMap => {
-  if (!isObject(parsed)) throw new Error('El estado debe ser un objeto de cuentas.');
+  if (!isObject(parsed)) throw new SafeError('El estado debe ser un objeto de cuentas.');
   for (const [accountId, record] of Object.entries(parsed)) {
     if (!isId(accountId) || !isObject(record) ||
         (record.lastPostId === undefined ? record.pendingPost === undefined || record.lastSyncedAt !== undefined
@@ -32,7 +33,7 @@ const validateState = (parsed: unknown): SyncStateMap => {
           !record.syncedPostIds.includes(record.lastPostId))) ||
         (record.pendingPost !== undefined && (!isObject(record.pendingPost) ||
           !isId(record.pendingPost.postId) || !isDate(record.pendingPost.startedAt)))) {
-      throw new Error('Esquema de estado inválido; se cancela para evitar duplicados.');
+      throw new SafeError('Esquema de estado inválido; se cancela para evitar duplicados.');
     }
   }
   return parsed as SyncStateMap;
@@ -44,11 +45,11 @@ export const loadSyncState = (filePath = STATE_FILE_PATH): SyncStateMap => {
     raw = fs.readFileSync(filePath, 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
-    throw new Error('No se pudo leer el estado; se cancela para evitar duplicados.');
+    throw new SafeError('No se pudo leer el estado; se cancela para evitar duplicados.');
   }
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch {
-    throw new Error('JSON de estado corrupto; restaurá una copia antes de publicar.');
+    throw new SafeError('JSON de estado corrupto; restaurá una copia antes de publicar.');
   }
   return validateState(parsed);
 };
@@ -81,14 +82,14 @@ export const createStateStore = (filePath = STATE_FILE_PATH) => {
       return record?.lastPostId === postId || Boolean(record?.syncedPostIds?.includes(postId));
     },
     begin(accountId: string, postId: string): void {
-      if (state[accountId]?.pendingPost) throw new Error('La cuenta tiene una publicación incierta; requiere recuperación.');
+      if (state[accountId]?.pendingPost) throw new SafeError('La cuenta tiene una publicación incierta; requiere recuperación.');
       const next = { ...state, [accountId]: { ...state[accountId],
         pendingPost: { postId, startedAt: new Date().toISOString() } } };
       saveSyncState(next, filePath);
       state = next;
     },
     clearPending(accountId: string): void {
-      if (!state[accountId]?.pendingPost) throw new Error('La cuenta no tiene una publicación incierta.');
+      if (!state[accountId]?.pendingPost) throw new SafeError('La cuenta no tiene una publicación incierta.');
       const next = structuredClone(state);
       delete next[accountId].pendingPost;
       if (!next[accountId].lastPostId) delete next[accountId];
@@ -114,3 +115,4 @@ export const isPostAlreadySynced = (accountId: string, postId: string): boolean 
   createStateStore().has(accountId, postId);
 export const markPostAsSynced = (accountId: string, record: AccountSyncRecord): void =>
   createStateStore().mark(accountId, record);
+

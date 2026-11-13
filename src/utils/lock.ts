@@ -1,3 +1,4 @@
+import { SafeError } from './errors';
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATE_FILE_PATH } from './state';
@@ -8,7 +9,7 @@ export const withStateLock = async <T>(task: () => Promise<T>, statePath = STATE
   const lockPath = `${statePath}.lock`;
   let fd: number;
   try { fd = fs.openSync(lockPath, 'wx', 0o600); } catch {
-    throw new Error('No se pudo adquirir el bloqueo de estado; revisá procesos activos y permisos.');
+    throw new SafeError('No se pudo adquirir el bloqueo de estado; revisá procesos activos y permisos.');
   }
   try {
     fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
@@ -18,3 +19,4 @@ export const withStateLock = async <T>(task: () => Promise<T>, statePath = STATE
     fs.unlinkSync(lockPath);
   }
 };
+
