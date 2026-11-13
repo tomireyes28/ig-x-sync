@@ -1,8 +1,9 @@
 import { config } from './config';
 import { createInstagramService } from './services/instagram';
-import { formatTweetCaption, postToTwitter } from './services/twitter';
+import { formatTweetCaption, prepareTweet, publishTweet } from './services/twitter';
 import { createStateStore } from './utils/state';
 import { runSync } from './sync';
+import { withStateLock } from './utils/lock';
 
 const main = async (): Promise<void> => {
   const isDryRun = process.argv.includes('--dry-run') || process.env.DRY_RUN === 'true';
@@ -10,14 +11,14 @@ const main = async (): Promise<void> => {
   const instagram = createInstagramService(config.meta);
   const result = await runSync(config.meta.accounts, {
     state, fetchFeed: instagram.fetchAccountFeed,
-    publish: post => postToTwitter(post.imageUrl, post.caption),
+    prepare: post => prepareTweet(post.imageUrl, post.caption), publish: publishTweet,
     preview: formatTweetCaption, log: console.log,
   }, isDryRun);
   console.log(`Finalizado: ${result.published} publicaciones, ${result.failures} errores.`);
   if (result.failures) process.exitCode = 1;
 };
 
-main().catch(() => {
+withStateLock(main).catch(() => {
   console.error('No se pudo iniciar la sincronización. Revisá configuración y estado.');
   process.exitCode = 1;
 });

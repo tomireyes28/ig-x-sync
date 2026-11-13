@@ -15,7 +15,8 @@ function dependencies(t, posts) {
   const state = createStateStore(path.join(dir, 'state.json'));
   const published = [];
   return { published, state, fetchFeed: async () => ({ username: 'demo', mediaCount: posts.length, posts }),
-    publish: async post => { published.push(post.id); return { id: '99' }; },
+    prepare: async post => ({ mediaId: post.id, text: post.caption }),
+    publish: async prepared => { published.push(prepared.mediaId); return { id: '99' }; },
     preview: text => text, log: () => {} };
 }
 
@@ -72,4 +73,27 @@ test('missing checkpoint and repeated or excessive pages stop without advancing 
   const endless = createInstagramService(settings, { get: async url => ({ data: url.endsWith('/media')
     ? { data: [], paging: { next: 'next', cursors: { after: String(++cursor) } } } : {} }) });
   await assert.rejects(endless.fetchAccountFeed('1', '11'), /20 páginas/);
+});
+
+test('ambiguous creation persists pending and prevents any further remote attempt', async t => {
+  const deps = dependencies(t, [media('11')]);
+  let attempts = 0;
+  deps.publish = async () => { attempts++; throw new Error('socket closed after send'); };
+  assert.equal((await runSync([account], deps, false)).failures, 1);
+  assert.equal(deps.state.getAccount('1').pendingPost.postId, '11');
+  assert.equal(deps.state.getAccount('1').lastPostId, undefined);
+  assert.equal((await runSync([account], deps, false)).failures, 1);
+  assert.equal(attempts, 1);
+  deps.state.clearPending('1');
+  deps.publish = async () => ({ id: '99' });
+  assert.equal((await runSync([account], deps, false)).published, 1);
+  assert.equal(deps.state.getAccount('1').pendingPost, undefined);
+});
+
+test('failed preparation does not mark pending or advance checkpoint', async t => {
+  const deps = dependencies(t, [media('11')]);
+  deps.prepare = async () => { throw new Error('download unavailable'); };
+  assert.equal((await runSync([account], deps, false)).failures, 1);
+  assert.equal(deps.state.getAccount('1'), undefined);
+  assert.deepEqual(deps.published, []);
 });

@@ -47,4 +47,8 @@ La protección de rama puede impedir el push de estado del bot y debe documentar
 
 ## Resultados finales
 
-Pendientes de completar en la etapa 3.
+- Etapa 1 (A01–A03): implementada; 11 pruebas pasan. Se cubren corrupción,
+  migración del estado previo, historial, paginación, límite de recorrido,
+  orden de publicación, dry-run, aislamiento de cuentas, exclusión local y
+  publicación incierta con recuperación.
+- Etapas 2 y 3: pendientes.

@@ -5,7 +5,8 @@ import type { StateStore } from './utils/state';
 export interface SyncDependencies {
   state: StateStore;
   fetchFeed(accountId: string, checkpoint?: string): Promise<InstagramAccountFeed>;
-  publish(post: SyncableInstagramPost): Promise<{ id: string }>;
+  prepare(post: SyncableInstagramPost): Promise<{ mediaId: string; text: string }>;
+  publish(prepared: { mediaId: string; text: string }): Promise<{ id: string }>;
   preview(caption: string): string;
   log(message: string): void;
 }
@@ -17,6 +18,9 @@ export const runSync = async (
   let published = 0;
   for (const account of accounts) {
     try {
+      if (deps.state.getAccount(account.id)?.pendingPost) {
+        throw new Error('Publicación incierta: verificá X y ejecutá npm run recover.');
+      }
       const checkpoint = deps.state.getAccount(account.id)?.lastPostId;
       const feed = await deps.fetchFeed(account.id, checkpoint);
       const candidates = feed.posts.map(resolveSyncablePost).filter(
@@ -27,7 +31,10 @@ export const runSync = async (
           deps.log(`[DRY-RUN] ${account.label} / ${post.id}: ${deps.preview(post.caption)}`);
           continue;
         }
-        const tweet = await deps.publish(post);
+        const prepared = await deps.prepare(post);
+        // Do not automatically retry after this boundary: the remote outcome may be unknown.
+        deps.state.begin(account.id, post.id);
+        const tweet = await deps.publish(prepared);
         deps.state.mark(account.id, { lastPostId: post.id, lastTweetId: tweet.id,
           lastSyncedAt: new Date().toISOString(), username: feed.username });
         published++;
